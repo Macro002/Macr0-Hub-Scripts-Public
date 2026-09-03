@@ -25,12 +25,17 @@ end
 -- surfaces read as glass rather than as flat boxes.
 -- ---------------------------------------------------------------------------
 local TRANSPARENCY = 0.12
-local ACCENT       = Color3.fromHex("#0091FF")   -- sliders, checkboxes, tooltips
-local MUTED        = Color3.fromHex("#a1a1aa")   -- icons
-local BASE         = Color3.fromHex("#101010")   -- window / popup / dialog fill
+local ACCENT       = Color3.fromHex("#a855f7")   -- sliders, checkboxes, tooltips
+local MUTED        = Color3.fromHex("#c084fc")   -- icons
+local BASE         = Color3.fromHex("#15121f")   -- window / popup / dialog fill
 
 local WHITE = Color3.new(1, 1, 1)
 local TEXT  = Color3.fromHex("#FFFFFF")
+
+-- This file can run once from loader.lua and again from a game script. WindUI
+-- rejects duplicate names; replace only our entry so the newest public theme
+-- and its helpers always finish loading.
+if Lib.Themes then Lib.Themes.Macr0 = nil end
 
 Lib:AddTheme({
     Name = "Macr0",
@@ -42,7 +47,7 @@ Lib:AddTheme({
 
     Background = BASE,
     BackgroundTransparency = TRANSPARENCY,
-    Dialog  = Color3.fromHex("#18181b"),
+    Dialog  = Color3.fromHex("#18141f"),
     Hover   = TEXT,
     Outline = Color3.fromHex("#2a2535"),
     Text    = TEXT,
@@ -55,7 +60,7 @@ Lib:AddTheme({
     PanelBackground = WHITE,
     PanelBackgroundTransparency = 0.95,
 
-    WindowBackground = BASE,
+    WindowBackground = Color3.fromHex("#0e0b14"),
     WindowShadow     = Color3.new(0, 0, 0),
     WindowTopbarTitle      = TEXT,
     WindowTopbarAuthor     = TEXT,
@@ -98,7 +103,7 @@ Lib:AddTheme({
     DialogContent = TEXT,
     DialogIcon    = MUTED,
 
-    Toggle    = Color3.fromHex("#52525b"),
+    Toggle    = Color3.fromHex("#4b3b5c"),
     ToggleBar = WHITE,
 
     Checkbox = ACCENT,
@@ -112,7 +117,7 @@ Lib:AddTheme({
     SliderIconFrom = MUTED,
     SliderIconTo   = MUTED,
 
-    Tooltip = Color3.fromHex("#4C4C4C"),
+    Tooltip = Color3.fromHex("#352b42"),
     TooltipText = WHITE,
     TooltipSecondary = ACCENT,
     TooltipSecondaryText = WHITE,
@@ -209,7 +214,8 @@ end
 -- everywhere.
 function UI.cursorGuard(W, name)
     name = name or "Macr0Cursor"
-    local hovering, savedIcon, savedEnabled = false, nil, nil
+    local hovering, savedIcon, savedEnabled, savedMouseIcon = false, nil, nil, nil
+    local mouse = Players.LocalPlayer:GetMouse()
 
     -- --------------------------------------------------------------------
     -- The game's own cursor.
@@ -227,7 +233,7 @@ function UI.cursorGuard(W, name)
     --
     -- Games that use MouseIcon instead are handled by the fallback below.
     -- --------------------------------------------------------------------
-    local cursorGui, cursorOrder
+    local cursorGui, cursorEnabled
     local function findCursorGui()
         if cursorGui and cursorGui.Parent then return cursorGui end
         local pg = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
@@ -235,39 +241,27 @@ function UI.cursorGuard(W, name)
         for _, g in ipairs(pg:GetChildren()) do
             if g:IsA("ScreenGui") and g.Name:lower():find("cursor") then
                 cursorGui = g
-                if not cursorOrder then
-                    cursorOrder = g.DisplayOrder
-                    -- Lift it above the hub so the pointer is visible over our
-                    -- panels. Anything below 999300 disappears behind them.
-                    pcall(function() g.DisplayOrder = 1000000 end)
-                end
                 return g
             end
         end
         return nil
     end
 
-    -- Force the arrow while over the hub: show image cursors, hide anything
-    -- named like the drawing dot. Original Visible is remembered per object so
-    -- leaving restores exactly what the game had.
-    local savedVis = {}
-    local function setGameCursor(arrow)
+    -- Free Draw's cursor hierarchy and image names have changed before. Trying
+    -- to guess which child is its arrow can leave both children hidden. Hide
+    -- the whole custom cursor GUI over Macr0 and explicitly enable Roblox's
+    -- stock arrow; restore the game GUI and prior mouse settings on exit.
+    local DEFAULT_CURSOR = "rbxasset://textures/Cursors/KeyboardMouse/ArrowFarCursor.png"
+    local function hideGameCursor(hidden)
         local g = findCursorGui()
         if not g then return false end
-        for _, o in ipairs(g:GetDescendants()) do
-            if o:IsA("GuiObject") then
-                if savedVis[o] == nil then savedVis[o] = o.Visible end
-                if arrow then
-                    local isDraw = o.Name:lower():find("draw") ~= nil
-                    local want = (not isDraw) and o:IsA("ImageLabel")
-                    if isDraw and o.Visible then o.Visible = false end
-                    if want and not o.Visible then o.Visible = true end
-                else
-                    if o.Visible ~= savedVis[o] then o.Visible = savedVis[o] end
-                end
-            end
+        if hidden then
+            if cursorEnabled == nil then cursorEnabled = g.Enabled end
+            if g.Enabled then g.Enabled = false end
+        elseif cursorEnabled ~= nil then
+            g.Enabled = cursorEnabled
+            cursorEnabled = nil
         end
-        if not arrow then savedVis = {} end
         return true
     end
 
@@ -324,34 +318,30 @@ function UI.cursorGuard(W, name)
         return false
     end
 
-    -- Lift the game's cursor above the hub NOW, not on first hover. Done
-    -- lazily it renders behind our panel until the pointer happens to enter
-    -- one, which looks like the cursor vanishing.
+    -- Locate it now so its original Enabled state can be captured on hover.
     pcall(findCursorGui)
 
     pcall(function()
-        RunService:BindToRenderStep(name, Enum.RenderPriority.Last.Value, function()
+        RunService:BindToRenderStep(name, Enum.RenderPriority.Last.Value + 1000, function()
             if over() then
                 if not hovering then
                     hovering = true
                     savedIcon = UIS.MouseIcon
                     savedEnabled = UIS.MouseIconEnabled
+                    savedMouseIcon = mouse.Icon
                 end
-                -- Drive the game's own cursor if it has one; otherwise fall
-                -- back to the system cursor. Re-asserted every frame because
-                -- the game rewrites it every frame too.
-                if not setGameCursor(true) then
-                    if UIS.MouseIcon ~= "" then UIS.MouseIcon = "" end
-                    if not UIS.MouseIconEnabled then UIS.MouseIconEnabled = true end
-                end
+                hideGameCursor(true)
+                if UIS.MouseIcon ~= DEFAULT_CURSOR then UIS.MouseIcon = DEFAULT_CURSOR end
+                if not UIS.MouseIconEnabled then UIS.MouseIconEnabled = true end
+                if mouse.Icon ~= DEFAULT_CURSOR then mouse.Icon = DEFAULT_CURSOR end
             elseif hovering then
                 hovering = false
-                if not setGameCursor(false) then
-                    pcall(function()
-                        UIS.MouseIcon = savedIcon or ""
-                        UIS.MouseIconEnabled = savedEnabled ~= false
-                    end)
-                end
+                hideGameCursor(false)
+                pcall(function()
+                    UIS.MouseIcon = savedIcon or ""
+                    UIS.MouseIconEnabled = savedEnabled ~= false
+                    mouse.Icon = savedMouseIcon or ""
+                end)
             end
         end)
     end)
@@ -360,16 +350,12 @@ function UI.cursorGuard(W, name)
         pcall(function() RunService:UnbindFromRenderStep(name) end)
         if hovering then
             hovering = false
-            pcall(function() setGameCursor(false) end)
+            pcall(function() hideGameCursor(false) end)
             pcall(function()
                 UIS.MouseIcon = savedIcon or ""
                 UIS.MouseIconEnabled = savedEnabled ~= false
+                mouse.Icon = savedMouseIcon or ""
             end)
-        end
-        -- Put the game's cursor back where we found it, or unloading the hub
-        -- would leave its DisplayOrder permanently raised.
-        if cursorGui and cursorOrder then
-            pcall(function() cursorGui.DisplayOrder = cursorOrder end)
         end
     end
 end
